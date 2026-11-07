@@ -1,0 +1,35 @@
+name: Collect activity
+
+on:
+  schedule:
+    - cron: "*/5 * * * *" # cada 5 minutos (GitHub puede retrasarlo)
+  workflow_dispatch: # botón "Run workflow" para lanzarlo a mano
+
+permissions:
+  contents: write
+
+# Nunca dos a la vez: si una tarda, la siguiente espera.
+concurrency:
+  group: collect
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Collect
+        run: node collect.mjs
+      - name: Save data
+        run: |
+          git config user.name "albioneye-bot"
+          git config user.email "albioneye-bot@users.noreply.github.com"
+          git add data
+          git diff --cached --quiet && exit 0
+          git commit -m "Datos $(date -u +%Y-%m-%dT%H:%M)"
+          git pull --rebase --quiet
+          git push --quiet
