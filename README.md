@@ -10,6 +10,9 @@ Every few minutes a GitHub Action reads the latest public kills from the Albion 
   (`solo`, `small` 2–5, `medium` 6–19, `large` 20+). Kills per minute = kills / `min`.
 - `steam.json`: per hour, sum and number of samples of players online on Steam.
 - `state.json`: last kill seen per server (to avoid counting twice).
+- `outages.json`: per server, recent outages (`start` = last kill before it, `end` = first kill
+  after it, `null` while ongoing). A server counts as down when no kill newer than 15 minutes
+  shows up (the API publishes kills about 5 minutes late).
 
 No individual kills or player data are stored.
 

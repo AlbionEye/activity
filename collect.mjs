@@ -1,6 +1,7 @@
 // Recolector de actividad de Albion Eye.
 // Cada pocos minutos (GitHub Actions) lee las kills nuevas de los tres servidores y los
 // jugadores conectados en Steam, y suma recuentos por hora (UTC). No guarda kills sueltas.
+// También apunta las caídas de cada servidor (cuando dejan de llegar kills).
 //
 // Las tareas programadas de GitHub no son puntuales y la API a veces falla, así que no se
 // cuentan "kills por hora" a secas: se guarda, por hora, cuántas kills se vieron y cuántos
@@ -23,6 +24,10 @@ const PAGE = 51; // máximo de la API por petición
 const MAX_PAGES = 20; // ~1000 kills: cubre retrasos de 40–50 minutos
 const MAX_GAP = 20 * 60_000; // un hueco así entre dos kills seguidas = la API saltó a kills antiguas
 const KEEP_DAYS = 120; // horas guardadas
+// Caídas: la API publica las kills con ~5 min de retraso; si la última kill es de hace más de
+// esto, el servidor está caído o en mantenimiento (hay decenas de kills por minuto siempre).
+const DOWN_AFTER = 15 * 60_000;
+const KEEP_OUTAGES = 60; // caídas guardadas por servidor
 
 const hourKey = (ms) => new Date(ms).toISOString().slice(0, 13); // "2026-11-07T11"
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -91,6 +96,7 @@ async function collectServer(server, base, state) {
 
   const newest = Math.max(...kills.map((k) => k.time));
   const oldest = Math.min(...kills.map((k) => k.time));
+  await trackOutage(server, newest, kills);
   // Tramo cubierto sin huecos: desde la última vez si se llegó a ella; si no, desde la kill
   // más antigua leída (lo de en medio se perdió y no cuenta).
   const from = reached ? st.lastTime : oldest;
@@ -108,6 +114,23 @@ async function collectServer(server, base, state) {
   await writeJson(`kills-${server}.json`, hours);
   st.lastTime = Math.max(st.lastTime, newest);
   return { server, kills: added, minutes: Math.round((newest - from) / 60_000), gap: !reached };
+}
+
+// Historial de caídas (data/outages.json): { servidor: [{ start, end }] }. Empieza en la
+// última kill antes de la caída y termina en la primera kill de después (end: null = en curso).
+async function trackOutage(server, newest, kills) {
+  const all = await readJson("outages.json", {});
+  const list = (all[server] ??= []);
+  const open = list.at(-1)?.end === null ? list.at(-1) : null;
+  const down = Date.now() - newest > DOWN_AFTER;
+  if (down && !open) list.push({ start: new Date(newest).toISOString(), end: null });
+  if (!down && open) {
+    const start = Date.parse(open.start);
+    const after = kills.map((k) => k.time).filter((t) => t > start);
+    open.end = new Date(after.length ? Math.min(...after) : newest).toISOString();
+  }
+  all[server] = list.slice(-KEEP_OUTAGES);
+  await writeJson("outages.json", all);
 }
 
 async function collectSteam(now) {
